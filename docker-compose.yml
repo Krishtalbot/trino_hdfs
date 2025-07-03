@@ -1,0 +1,86 @@
+version: "3"
+
+services:
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: namenode
+    restart: always
+    ports:
+      - "9870:9870"
+      - "9000:9000"
+    volumes:
+      - hadoop_namenode:/hadoop/dfs/name
+      - ./hadoop-config:/etc/hadoop
+    environment:
+      - CLUSTER_NAME=test
+    env_file:
+      - ./hadoop.env
+
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode
+    restart: always
+    depends_on:
+      - namenode
+    volumes:
+      - hadoop_datanode:/hadoop/dfs/data
+    environment:
+      SERVICE_PRECONDITION: "namenode:9870"
+    env_file:
+      - ./hadoop.env
+    ports:
+      - "9864:9864"
+
+  hive-metastore:
+    image: bde2020/hive:2.3.2-postgresql-metastore
+    container_name: hive-metastore
+    user: root
+    restart: always
+    ports:
+      - "9083:9083" # Metastore Thrift port
+    volumes:
+      - ./hadoop-config:/etc/hadoop:rw
+      - ./hive-site:/opt/hive/conf:rw
+      - ./hive-metastore-init.sh:/hive-metastore-init.sh
+    command: ["sh", "-c", "/hive-metastore-init.sh"]
+    environment:
+      - HADOOP_NAMENODE_HOSTNAME=namenode
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+      - HIVE_SITE_CONF_javax_jdo_option_ConnectionURL=jdbc:postgresql://hive-metastore-postgresql/metastore
+      - HIVE_SITE_CONF_javax_jdo_option_ConnectionDriverName=org.postgresql.Driver
+      - HIVE_SITE_CONF_javax_jdo_option_ConnectionUserName=hive
+      - HIVE_SITE_CONF_javax_jdo_option_ConnectionPassword=hive
+      - HIVE_SITE_CONF_datanucleus_autoCreateSchema=true
+      - HIVE_SITE_CONF_hive_metastore_uris=thrift://hive-metastore:9083
+    depends_on:
+      - namenode
+      - datanode
+      - hive-metastore-postgresql
+
+  hive-metastore-postgresql:
+    image: bde2020/hive-metastore-postgresql:2.3.0
+    container_name: hive-metastore-postgresql
+    restart: always
+    environment:
+      - POSTGRES_DB=metastore
+      - POSTGRES_USER=hive
+      - POSTGRES_PASSWORD=hive
+
+  trino-coordinator:
+    image: trinodb/trino:423
+    container_name: trino-coordinator
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./trino/etc:/etc/trino
+      - ./hadoop-config:/etc/hadoop
+    environment:
+      - JAVA_HOME=/usr/lib/jvm/zulu11
+    depends_on:
+      - namenode
+      - datanode
+      - hive-metastore
+
+volumes:
+  hadoop_namenode:
+  hadoop_datanode:
